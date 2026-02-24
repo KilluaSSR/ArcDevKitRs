@@ -29,6 +29,8 @@ pub enum ArcError {
     },
     /// 序列化/反序列化错误
     Serialization(String),
+    /// 任务队列已关闭，无法继续操作
+    QueueClosed,
     /// 其他通用错误
     Other(String),
 }
@@ -61,7 +63,8 @@ impl fmt::Display for ArcError {
             Self::Skipped(reason) => write!(f, "操作已跳过: {:?}", reason),
             Self::Timeout { operation, duration_secs } => write!(f, "操作超时 ({}s): {}", duration_secs, operation),
             Self::Serialization(msg) => write!(f, "序列化错误: {}", msg),
-            Self::Other(msg) => write!(f, "错诶: {}", msg),
+            Self::QueueClosed => write!(f, "任务队列已关闭/Task queue is closed"),
+            Self::Other(msg) => write!(f, "错误: {}", msg),
         }
     }
 }

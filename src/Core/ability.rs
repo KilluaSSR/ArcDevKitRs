@@ -7,7 +7,7 @@ use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AbilityIdentity(pub &'static str);
 
 impl AbilityIdentity {
@@ -23,8 +23,7 @@ pub enum AbilityExecutionMode {
     Manual,
 }
 
-/// 能力的只读元数据描述符
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AbilityDescriptor {
     pub identity: AbilityIdentity,
     pub display_name: &'static str,

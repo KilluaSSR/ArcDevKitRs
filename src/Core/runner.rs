@@ -80,7 +80,7 @@ impl ModuleRegistry {
 
         let mut futures = Vec::new();
         for module in active_modules {
-            let identity = module.descriptor().identity.clone();
+            let identity = module.descriptor().identity;
             let future = async move {
                 match module.initialize_erased().await {
                     Ok(_) => Ok(identity),
@@ -115,7 +115,7 @@ impl ModuleRegistry {
     ) -> HashMap<ModuleIdentity, Vec<AbilityResult>> {
         let active_modules: Vec<_> = Self::modules()
             .filter(|m| !m.descriptor().is_disabled)
-            .map(|m| m.descriptor().identity.clone())
+            .map(|m| m.descriptor().identity)
             .collect();
 
         let mut target_abilities = Vec::new();
@@ -134,7 +134,8 @@ impl ModuleRegistry {
 
         let mut map: HashMap<ModuleIdentity, Vec<AbilityResult>> = HashMap::new();
         for res in results {
-            map.entry(res.module_identity.clone()).or_default().push(res);
+            let key = res.module_identity;
+            map.entry(key).or_default().push(res);
         }
         map
     }
@@ -179,7 +180,7 @@ impl ModuleRegistry {
         };
 
         AbilityResult {
-            ability_identity: desc.identity.clone(),
+            ability_identity: desc.identity,
             module_identity: ability.module_identity(),
             display_name: desc.display_name,
             description: desc.description,

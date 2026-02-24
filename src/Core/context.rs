@@ -2,7 +2,7 @@ use std::time::Duration;
 
 /// 能力执行上下文
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AbilityExecutionContext {
     /// 是否以管理员权限运行
     pub is_admin: bool,
