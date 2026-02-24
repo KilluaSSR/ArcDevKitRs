@@ -28,20 +28,16 @@ pub struct AbilityDescriptor {
     pub identity: AbilityIdentity,
     pub display_name: &'static str,
     pub description: &'static str,
-    /// 优先级，数值越低越先执行
     pub priority: i32,
-    /// 发现后是否默认挂载（禁用状态将被跳过）
     pub is_enabled_by_default: bool,
     pub execution_mode: AbilityExecutionMode,
+    pub depends_on: &'static [AbilityIdentity],
 }
 
-
 pub trait Ability: Send + Sync {
-    
     type Output: 'static + Send + Sync + Serialize;
 
     fn module_identity(&self) -> ModuleIdentity;
-
     fn descriptor(&self) -> &AbilityDescriptor;
 
     fn is_enabled(&self) -> bool {
@@ -77,49 +73,57 @@ pub trait Ability: Send + Sync {
     }
 }
 
-
 pub trait AbilityExecutor: Send + Sync {
     fn module_identity(&self) -> ModuleIdentity;
     fn descriptor(&self) -> &AbilityDescriptor;
     fn is_enabled(&self) -> bool;
 
-    fn execute_erased<'a>(
+    fn execute<'a>(
         &'a self,
         ctx: &'a AbilityExecutionContext,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<Box<dyn ErasedSerialize + Send + Sync>, AbilityError>>
-                + Send
+            dyn Future<
+                    Output = Result<
+                        (
+                            Box<dyn ErasedSerialize + Send + Sync>,
+                            Box<dyn Any + Send + Sync>,
+                        ),
+                        AbilityError,
+                    >,
+                > + Send
                 + 'a,
         >,
     >;
-
-    fn execute_any<'a>(
-        &'a self,
-        ctx: &'a AbilityExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send + Sync>, AbilityError>> + Send + 'a>>;
 }
 
 impl<T: Ability> AbilityExecutor for T {
     fn module_identity(&self) -> ModuleIdentity {
         self.module_identity()
     }
-    
+
     fn descriptor(&self) -> &AbilityDescriptor {
         self.descriptor()
     }
-    
+
     fn is_enabled(&self) -> bool {
         self.is_enabled()
     }
 
-    fn execute_erased<'a>(
+    fn execute<'a>(
         &'a self,
         ctx: &'a AbilityExecutionContext,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<Box<dyn ErasedSerialize + Send + Sync>, AbilityError>>
-                + Send
+            dyn Future<
+                    Output = Result<
+                        (
+                            Box<dyn ErasedSerialize + Send + Sync>,
+                            Box<dyn Any + Send + Sync>,
+                        ),
+                        AbilityError,
+                    >,
+                > + Send
                 + 'a,
         >,
     > {
@@ -130,28 +134,11 @@ impl<T: Ability> AbilityExecutor for T {
             match self.run_async(ctx).await {
                 Ok(output) => {
                     self.after_execute(ctx, Some(&output)).await;
-                    Ok(Box::new(output) as Box<dyn ErasedSerialize + Send + Sync>)
-                }
-                Err(e) => {
-                    self.on_error(ctx, &e).await;
-                    Err(e)
-                }
-            }
-        })
-    }
-
-    fn execute_any<'a>(
-        &'a self,
-        ctx: &'a AbilityExecutionContext,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn Any + Send + Sync>, AbilityError>> + Send + 'a>> {
-        Box::pin(async move {
-            if !self.before_execute(ctx).await? {
-                return Err(AbilityError::Skipped(SkipReason::Disabled));
-            }
-            match self.run_async(ctx).await {
-                Ok(output) => {
-                    self.after_execute(ctx, Some(&output)).await;
-                    Ok(Box::new(output) as Box<dyn Any + Send + Sync>)
+                    let serialized = serde_json::to_value(&output)
+                        .map_err(|e| AbilityError::Serialization(e.to_string()))?;
+                    let ser_box = Box::new(serialized) as Box<dyn ErasedSerialize + Send + Sync>;
+                    let any_box = Box::new(output) as Box<dyn Any + Send + Sync>;
+                    Ok((ser_box, any_box))
                 }
                 Err(e) => {
                     self.on_error(ctx, &e).await;
@@ -162,5 +149,4 @@ impl<T: Ability> AbilityExecutor for T {
     }
 }
 
-// 自动向全局系统注册该 trait 对象能力
 inventory::collect!(&'static dyn AbilityExecutor);

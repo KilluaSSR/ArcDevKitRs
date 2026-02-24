@@ -6,7 +6,6 @@ use erased_serde::Serialize as ErasedSerialize;
 use std::any::Any;
 use std::collections::HashMap;
 
-/// 执行结果
 pub struct AbilityResult {
     pub ability_identity: AbilityIdentity,
     pub module_identity: ModuleIdentity,
@@ -60,6 +59,14 @@ impl AbilityResult {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionStrategy {
+    #[default]
+    Parallel,
+    Sequential,
+    PriorityGrouped,
+}
+
 pub struct ModuleRegistry;
 
 impl ModuleRegistry {
@@ -93,78 +100,137 @@ impl ModuleRegistry {
         futures::future::join_all(futures).await
     }
 
+    pub async fn shutdown_all() {
+        let modules: Vec<_> = Self::modules()
+            .filter(|m| !m.descriptor().is_disabled)
+            .collect();
+        for module in modules.into_iter().rev() {
+            module.shutdown_erased().await;
+        }
+    }
+
     pub async fn execute_abilities(
         module_id: &ModuleIdentity,
         mode: AbilityExecutionMode,
         ctx: &AbilityExecutionContext,
+        strategy: ExecutionStrategy,
     ) -> Vec<AbilityResult> {
-        let targets = Self::abilities()
+        let mut targets: Vec<_> = Self::abilities()
             .filter(|a| {
                 a.module_identity() == *module_id
                     && a.is_enabled()
                     && a.descriptor().execution_mode == mode
             })
-            .collect::<Vec<_>>();
+            .collect();
+        targets.sort_by_key(|a| a.descriptor().priority);
 
-        Self::run_abilities_parallel(targets, ctx).await
+        Self::run_with_strategy(targets, ctx, strategy).await
     }
 
     pub async fn execute_all(
         mode: AbilityExecutionMode,
         ctx: &AbilityExecutionContext,
+        strategy: ExecutionStrategy,
     ) -> HashMap<ModuleIdentity, Vec<AbilityResult>> {
         let active_modules: Vec<_> = Self::modules()
             .filter(|m| !m.descriptor().is_disabled)
             .map(|m| m.descriptor().identity)
             .collect();
 
-        let mut target_abilities = Vec::new();
+        let mut all_targets = Vec::new();
         for m_id in &active_modules {
-            let mut group = Self::abilities()
+            let mut group: Vec<_> = Self::abilities()
                 .filter(|a| {
                     a.module_identity() == *m_id
                         && a.is_enabled()
                         && a.descriptor().execution_mode == mode
                 })
-                .collect::<Vec<_>>();
-            target_abilities.append(&mut group);
+                .collect();
+            all_targets.append(&mut group);
         }
+        all_targets.sort_by_key(|a| a.descriptor().priority);
 
-        let results = Self::run_abilities_parallel(target_abilities, ctx).await;
+        let results = Self::run_with_strategy(all_targets, ctx, strategy).await;
 
         let mut map: HashMap<ModuleIdentity, Vec<AbilityResult>> = HashMap::new();
         for res in results {
-            let key = res.module_identity;
-            map.entry(key).or_default().push(res);
+            map.entry(res.module_identity).or_default().push(res);
         }
         map
     }
 
-    async fn run_abilities_parallel(
+    async fn run_with_strategy(
+        abilities: Vec<&'static dyn AbilityExecutor>,
+        ctx: &AbilityExecutionContext,
+        strategy: ExecutionStrategy,
+    ) -> Vec<AbilityResult> {
+        match strategy {
+            ExecutionStrategy::Parallel => Self::run_parallel(abilities, ctx).await,
+            ExecutionStrategy::Sequential => Self::run_sequential(abilities, ctx).await,
+            ExecutionStrategy::PriorityGrouped => {
+                Self::run_priority_grouped(abilities, ctx).await
+            }
+        }
+    }
+
+    async fn run_parallel(
         abilities: Vec<&'static dyn AbilityExecutor>,
         ctx: &AbilityExecutionContext,
     ) -> Vec<AbilityResult> {
         let futures: Vec<_> = abilities
             .into_iter()
-            .map(|ability| async move { Self::execute_single_ability(ability, ctx).await })
+            .map(|a| async move { Self::execute_single(a, ctx).await })
             .collect();
-
         futures::future::join_all(futures).await
     }
 
-    async fn execute_single_ability(
+    async fn run_sequential(
+        abilities: Vec<&'static dyn AbilityExecutor>,
+        ctx: &AbilityExecutionContext,
+    ) -> Vec<AbilityResult> {
+        let mut results = Vec::with_capacity(abilities.len());
+        for ability in abilities {
+            results.push(Self::execute_single(ability, ctx).await);
+        }
+        results
+    }
+
+    async fn run_priority_grouped(
+        abilities: Vec<&'static dyn AbilityExecutor>,
+        ctx: &AbilityExecutionContext,
+    ) -> Vec<AbilityResult> {
+        let mut results = Vec::new();
+        let mut group: Vec<&'static dyn AbilityExecutor> = Vec::new();
+        let mut current_priority: Option<i32> = None;
+
+        for ability in abilities {
+            let p = ability.descriptor().priority;
+            if current_priority != Some(p) {
+                if !group.is_empty() {
+                    let batch = Self::run_parallel(std::mem::take(&mut group), ctx).await;
+                    results.extend(batch);
+                }
+                current_priority = Some(p);
+            }
+            group.push(ability);
+        }
+
+        if !group.is_empty() {
+            let batch = Self::run_parallel(group, ctx).await;
+            results.extend(batch);
+        }
+
+        results
+    }
+
+    async fn execute_single(
         ability: &'static dyn AbilityExecutor,
         ctx: &AbilityExecutionContext,
     ) -> AbilityResult {
         let desc = ability.descriptor();
-        let execute_future = async {
-            let serializable = ability.execute_erased(ctx).await?;
-            let any = ability.execute_any(ctx).await?;
-            Ok::<_, AbilityError>((serializable, any))
-        };
 
         let outcome = if let Some(timeout) = ctx.timeout {
-            match tokio::time::timeout(timeout, execute_future).await {
+            match tokio::time::timeout(timeout, ability.execute(ctx)).await {
                 Ok(Ok((serializable, any))) => AbilityOutcome::Success { serializable, any },
                 Ok(Err(e)) => AbilityOutcome::Failure(e),
                 Err(_) => AbilityOutcome::Failure(AbilityError::timeout(
@@ -173,7 +239,7 @@ impl ModuleRegistry {
                 )),
             }
         } else {
-            match execute_future.await {
+            match ability.execute(ctx).await {
                 Ok((serializable, any)) => AbilityOutcome::Success { serializable, any },
                 Err(e) => AbilityOutcome::Failure(e),
             }
