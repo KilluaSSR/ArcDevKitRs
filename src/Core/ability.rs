@@ -7,7 +7,7 @@ use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AbilityIdentity(pub &'static str);
 
 impl AbilityIdentity {

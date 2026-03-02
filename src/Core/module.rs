@@ -3,7 +3,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// 强类型的模块身份标识
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleIdentity(pub &'static str);
 
 impl ModuleIdentity {
