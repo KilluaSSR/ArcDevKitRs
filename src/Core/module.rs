@@ -2,7 +2,6 @@ use crate::Core::error::ModuleError;
 use std::future::Future;
 use std::pin::Pin;
 
-/// 强类型的模块身份标识
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleIdentity(pub &'static str);
 
@@ -12,8 +11,7 @@ impl ModuleIdentity {
     }
 }
 
-/// 模块元数据描述符
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ModuleDescriptor {
     /// 模块唯一标识
     pub identity: ModuleIdentity,
