@@ -16,14 +16,14 @@ impl AbilityIdentity {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum AbilityExecutionMode {
     #[default]
     Auto,
     Manual,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct AbilityDescriptor {
     pub identity: AbilityIdentity,
     pub display_name: &'static str,
@@ -32,6 +32,10 @@ pub struct AbilityDescriptor {
     pub is_enabled_by_default: bool,
     pub execution_mode: AbilityExecutionMode,
     pub depends_on: &'static [AbilityIdentity],
+    /// 强制屏蔽输出（仍执行，结果不进入结果集）。
+    pub force_disabled_output: bool,
+    /// 运行时动态屏蔽输出。
+    pub auto_disable_output: bool,
 }
 
 pub trait Ability: Send + Sync {
@@ -129,7 +133,7 @@ impl<T: Ability> AbilityExecutor for T {
     > {
         Box::pin(async move {
             if !self.before_execute(ctx).await? {
-                return Err(AbilityError::Skipped(SkipReason::Disabled));
+                return Err(AbilityError::Skipped(SkipReason::FilteredOut));
             }
             match self.run_async(ctx).await {
                 Ok(output) => {

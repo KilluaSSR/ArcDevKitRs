@@ -36,7 +36,7 @@ pub enum ArcError {
 }
 
 /// 模块或能力被跳过的原因
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SkipReason {
     /// 模块被用户配置禁用
     Disabled,
@@ -108,8 +108,6 @@ impl ArcError {
     }
 }
 
-/// 模块级错误别名
 pub type ModuleError = ArcError;
 
-/// 能力级错误别名
 pub type AbilityError = ArcError;

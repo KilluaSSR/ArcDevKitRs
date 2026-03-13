@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TaskQueueConfig {
     pub rate_limit: Option<Duration>,
     pub max_retries: Option<u32>,
@@ -112,7 +112,7 @@ impl<T: Send + 'static> TaskQueue<T> {
         self.sender.is_closed()
     }
 
-    /// 非阻塞检查速率限制，返回 true 表示可以消费
+
     async fn check_rate_limit(&self) -> bool {
         let rate_limit = { self.config.read().await.rate_limit };
         if let Some(rate_limit) = rate_limit {
@@ -124,7 +124,7 @@ impl<T: Send + 'static> TaskQueue<T> {
         true
     }
 
-    /// 阻塞等待直到速率限制允许
+
     async fn wait_rate_limit(&self) {
         let rate_limit = { self.config.read().await.rate_limit };
         if let Some(rate_limit) = rate_limit {

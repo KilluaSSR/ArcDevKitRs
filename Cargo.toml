@@ -2,7 +2,7 @@
 name = "ArcDevKit"
 version = "0.1.0"
 edition = "2024"
-authors = ["KilluaSSR xiaotian2001@outlook.com>"]
+authors = ["KilluaSSR <xiaotian2001@outlook.com>"]
 description = "The core generic module and ability framework."
 repository = "https://github.com/KilluaSSR/ArcDevKitRs"
 license = "MIT"

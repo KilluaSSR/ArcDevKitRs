@@ -2,6 +2,7 @@ pub mod ability;
 pub mod context;
 pub mod error;
 pub mod event;
+pub mod macros;
 pub mod module;
 pub mod runner;
 

@@ -11,23 +11,22 @@ impl ModuleIdentity {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Copy, Clone)]
 pub struct ModuleDescriptor {
-    /// 模块唯一标识
     pub identity: ModuleIdentity,
-    /// 展示名称
     pub display_name: &'static str,
-    /// 功能描述
     pub description: &'static str,
-    /// 模块的语法版本
     pub version: &'static str,
-    /// 作者
     pub author: Option<&'static str>,
-    /// 是否直接被系统禁用，设为 true 时将在收集期被直接跳过
+    /// `true` 时模块完全跳过（不初始化、不执行）。
     pub is_disabled: bool,
+    /// 强制屏蔽输出（模块仍执行，结果不进入结果集）。
+    pub force_disabled_output: bool,
+    /// 运行时动态屏蔽输出。
+    pub auto_disable_output: bool,
 }
 
-/// 所有业务模块必须实现的核心 Trait，以支持系统自动收集。
+
 pub trait Module: Send + Sync {
     fn descriptor(&self) -> &ModuleDescriptor;
 
@@ -40,7 +39,7 @@ pub trait Module: Send + Sync {
     }
 }
 
-/// 类型擦除的模块执行器。
+
 pub trait ModuleExecutor: Send + Sync {
     fn descriptor(&self) -> &ModuleDescriptor;
     fn initialize_erased<'a>(&'a self) -> Pin<Box<dyn Future<Output = Result<(), ModuleError>> + Send + 'a>>;
@@ -61,5 +60,4 @@ impl<T: Module> ModuleExecutor for T {
     }
 }
 
-// 自动向全局系统注册该 trait 对象收集功能
 inventory::collect!(&'static dyn ModuleExecutor);

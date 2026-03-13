@@ -8,6 +8,7 @@ use crate::Core::event::EventBus;
 
 pub struct AbilityExecutionContext {
     pub is_admin: bool,
+    pub output_enabled: bool,
     pub timeout: Option<Duration>,
     pub cancellation: CancellationToken,
     pub metadata: DashMap<String, Box<dyn Any + Send + Sync>>,
@@ -22,6 +23,7 @@ impl Default for AbilityExecutionContext {
             cancellation: CancellationToken::new(),
             metadata: DashMap::new(),
             event_bus: Arc::new(EventBus::new()),
+            output_enabled: true,
         }
     }
 }
@@ -29,6 +31,16 @@ impl Default for AbilityExecutionContext {
 impl AbilityExecutionContext {
     pub fn with_admin(mut self) -> Self {
         self.is_admin = true;
+        self
+    }
+
+    pub fn disable_output(mut self) -> Self {
+        self.output_enabled = false;
+        self
+    }
+
+    pub fn enable_output(mut self) -> Self {
+        self.output_enabled = true;
         self
     }
 

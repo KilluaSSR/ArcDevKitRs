@@ -1,4 +1,5 @@
 use ArcDevKit::TaskQueue::{TaskQueue, TaskQueueManager};
+use std::sync::Arc;
 
 // ─── 定义任务类型（类型本身即为队列的键，无需字符串）───────────
 
@@ -58,13 +59,14 @@ async fn try_dequeue_empty_returns_none() {
 #[tokio::test]
 async fn concurrent_producers() {
     let manager = TaskQueueManager::new();
-    let queue: &'static TaskQueue<u64> = manager.get_or_create::<u64>();
+    let queue: Arc<TaskQueue<u64>> = manager.get_or_create::<u64>();
 
     let mut handles = Vec::new();
     for i in 0..10u64 {
+        let q = Arc::clone(&queue);
         handles.push(tokio::spawn(async move {
             for j in 0..100u64 {
-                queue.enqueue(i * 100 + j).unwrap();
+                q.enqueue(i * 100 + j).unwrap();
             }
         }));
     }
@@ -122,8 +124,8 @@ async fn manager_get_or_create_idempotent() {
     let q1 = manager.get_or_create::<DownloadTask>();
     let q2 = manager.get_or_create::<DownloadTask>();
 
-    // 应返回同一个 &'static 引用
-    assert!(std::ptr::eq(q1, q2));
+    // 应返回指向同一底层对象的 Arc
+    assert!(Arc::ptr_eq(&q1, &q2));
 }
 
 // ─── TaskQueueManager: 类型隔离 ────────────────────────────────
@@ -184,22 +186,22 @@ async fn manager_global_singleton() {
 #[tokio::test]
 async fn cross_task_produce_consume() {
     let manager = TaskQueueManager::new();
-    let queue: &'static TaskQueue<String> = manager.get_or_create::<String>();
+    let queue: Arc<TaskQueue<String>> = manager.get_or_create::<String>();
 
-    // 生产者任务 
+    // 生产者任务
+    let producer_queue = Arc::clone(&queue);
     let producer = tokio::spawn(async move {
         for i in 0..5 {
-            queue.enqueue(format!("task-{}", i)).unwrap();
+            producer_queue.enqueue(format!("task-{}", i)).unwrap();
         }
-        queue.close_async().await;
+        producer_queue.close_async().await;
     });
 
-    // 因为 queue 已被 move 到 producer 中，需要重新从 manager 获取
-    // 但这是同一个 &'static 引用
-    let queue = manager.get_or_create::<String>();
+    // 消费者任务使用同一个 Arc
+    let consumer_queue = Arc::clone(&queue);
     let consumer = tokio::spawn(async move {
         let mut results = Vec::new();
-        while let Some(item) = queue.dequeue().await {
+        while let Some(item) = consumer_queue.dequeue().await {
             results.push(item);
         }
         results

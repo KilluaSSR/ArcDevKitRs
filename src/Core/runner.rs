@@ -11,6 +11,7 @@ pub struct AbilityResult {
     pub module_identity: ModuleIdentity,
     pub display_name: &'static str,
     pub description: &'static str,
+    pub output_disabled: bool,
     result: AbilityOutcome,
 }
 
@@ -25,6 +26,10 @@ enum AbilityOutcome {
 impl AbilityResult {
     pub fn is_success(&self) -> bool {
         matches!(self.result, AbilityOutcome::Success { .. })
+    }
+
+    pub fn is_skipped(&self) -> bool {
+        matches!(self.result, AbilityOutcome::Failure(ref e) if e.is_skipped())
     }
 
     pub fn error(&self) -> Option<&AbilityError> {
@@ -124,7 +129,16 @@ impl ModuleRegistry {
             .collect();
         targets.sort_by_key(|a| a.descriptor().priority);
 
-        Self::run_with_strategy(targets, ctx, strategy).await
+        let mut results = Self::run_with_strategy(targets, ctx, strategy).await;
+
+
+        for result in &mut results {
+            if Self::is_ability_output_disabled(result, ctx) {
+                result.output_disabled = true;
+            }
+        }
+
+        results
     }
 
     pub async fn execute_all(
@@ -134,29 +148,54 @@ impl ModuleRegistry {
     ) -> HashMap<ModuleIdentity, Vec<AbilityResult>> {
         let active_modules: Vec<_> = Self::modules()
             .filter(|m| !m.descriptor().is_disabled)
-            .map(|m| m.descriptor().identity)
             .collect();
 
-        let mut all_targets = Vec::new();
-        for m_id in &active_modules {
+        let mut map: HashMap<ModuleIdentity, Vec<AbilityResult>> = HashMap::new();
+
+
+        for module in &active_modules {
+            let m_id = module.descriptor().identity;
             let mut group: Vec<_> = Self::abilities()
                 .filter(|a| {
-                    a.module_identity() == *m_id
+                    a.module_identity() == m_id
                         && a.is_enabled()
                         && a.descriptor().execution_mode == mode
                 })
                 .collect();
-            all_targets.append(&mut group);
-        }
-        all_targets.sort_by_key(|a| a.descriptor().priority);
+            group.sort_by_key(|a| a.descriptor().priority);
 
-        let results = Self::run_with_strategy(all_targets, ctx, strategy).await;
+            let mut results = Self::run_with_strategy(group, ctx, strategy).await;
 
-        let mut map: HashMap<ModuleIdentity, Vec<AbilityResult>> = HashMap::new();
-        for res in results {
-            map.entry(res.module_identity).or_default().push(res);
+            let module_output_disabled = module.descriptor().force_disabled_output
+                || module.descriptor().auto_disable_output
+                || !ctx.output_enabled;
+
+
+            for result in &mut results {
+                if module_output_disabled || Self::is_ability_output_disabled(result, ctx) {
+                    result.output_disabled = true;
+                }
+            }
+
+            if !results.is_empty() {
+                map.insert(m_id, results);
+            }
         }
+
         map
+    }
+
+    fn is_ability_output_disabled(result: &AbilityResult, ctx: &AbilityExecutionContext) -> bool {
+        let ability_disabled = Self::abilities()
+            .find(|a| a.descriptor().identity == result.ability_identity
+                && a.module_identity() == result.module_identity)
+            .map(|a| {
+                let desc = a.descriptor();
+                desc.force_disabled_output || desc.auto_disable_output
+            })
+            .unwrap_or(false);
+
+        ability_disabled || !ctx.output_enabled
     }
 
     async fn run_with_strategy(
@@ -250,6 +289,7 @@ impl ModuleRegistry {
             module_identity: ability.module_identity(),
             display_name: desc.display_name,
             description: desc.description,
+            output_disabled: false,
             result: outcome,
         }
     }

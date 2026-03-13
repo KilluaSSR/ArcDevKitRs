@@ -1,7 +1,8 @@
 use dashmap::DashMap;
 use std::any::{Any, TypeId};
+use std::sync::Arc;
 
-type Handler = Box<dyn Fn(&dyn Any) + Send + Sync>;
+type Handler = Arc<dyn Fn(&dyn Any) + Send + Sync>;
 
 pub struct EventBus {
     listeners: DashMap<TypeId, Vec<Handler>>,
@@ -16,10 +17,13 @@ impl EventBus {
 
     pub fn publish<E: Any + Send + Sync>(&self, event: &E) {
         let type_id = TypeId::of::<E>();
-        if let Some(handlers) = self.listeners.get(&type_id) {
-            for handler in handlers.value().iter() {
-                handler(event as &dyn Any);
-            }
+
+        let snapshot: Vec<Handler> = match self.listeners.get(&type_id) {
+            Some(guard) => guard.value().iter().map(Arc::clone).collect(),
+            None => return,
+        };
+        for handler in &snapshot {
+            handler(event as &dyn Any);
         }
     }
 
@@ -28,7 +32,7 @@ impl EventBus {
         F: Fn(&E) + Send + Sync + 'static,
     {
         let type_id = TypeId::of::<E>();
-        let wrapped: Handler = Box::new(move |any| {
+        let wrapped: Handler = Arc::new(move |any| {
             if let Some(event) = any.downcast_ref::<E>() {
                 handler(event);
             }
